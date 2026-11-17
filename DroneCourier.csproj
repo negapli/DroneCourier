@@ -6,6 +6,8 @@
     <!-- Override with: dotnet build -p:GameDir="/path/to/Schedule I" -->
     <GameDir Condition="'$(GameDir)' == ''">$(HOME)/.local/share/Steam/steamapps/common/Schedule I</GameDir>
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <!-- Keep local folder names out of the built DLL (the debug-symbol path is stamped into it) -->
+    <PathMap>$(MSBuildProjectDirectory)=DroneCourier</PathMap>
     <SteamNetworkLibDll Condition="'$(SteamNetworkLibDll)' == ''">$(GameDir)/UserLibs/SteamNetworkLib-IL2Cpp.dll</SteamNetworkLibDll>
   </PropertyGroup>
   <ItemGroup>
