@@ -87,6 +87,9 @@ public class Drones : Saveable
         return drone;
     }
 
+    // S1API keeps one instance per game session: a save with no drone data must not inherit the last save's (or host's) drones.
+    protected override void OnCreated() => Owned = new();
+
     protected override void OnLoaded()
     {
         Courier.OnLoad();

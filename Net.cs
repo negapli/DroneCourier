@@ -152,6 +152,9 @@ static class Net
 
     public static void Tick()
     {
+        // A co-op client never loads the save, so S1API never creates Drones there: make the mirror of the host's list.
+        // (If the client later loads its own save, S1API's instance replaces it via the constructor.)
+        if (Drones.Instance == null && IsClient) new Drones();
         if (Drones.Instance == null || !Online) return;
         try
         {
