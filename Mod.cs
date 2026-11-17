@@ -1,6 +1,6 @@
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(DroneCourier.Mod), "DroneCourier", "0.1.3", "pligane")]
+[assembly: MelonInfo(typeof(DroneCourier.Mod), "DroneCourier", "0.1.4", "pligane")]
 [assembly: MelonGame("TVGS", "Schedule I")]
 
 namespace DroneCourier;

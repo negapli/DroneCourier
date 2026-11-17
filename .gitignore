@@ -2,3 +2,12 @@ bin/
 obj/
 *.user
 .vs/
+
+# Dev notes (private)
+CLAUDE.md
+HANDOFF.md
+idea.md
+MODLOG.md
+
+# Built packages
+dist/

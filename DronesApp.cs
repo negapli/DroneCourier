@@ -16,7 +16,7 @@ public class DronesApp : PhoneApp
     protected override string AppTitle => "Drones";
     protected override string IconLabel => "Drones";
     protected override string IconFileName => "DroneCourier.png"; // unused: IconSprite below wins
-    protected override Sprite IconSprite => icon ??= LoadIcon();
+    protected override Sprite IconSprite => icon != null ? icon : icon = LoadIcon(); // Unity null: a destroyed sprite is "null" but ?? misses it
     static Sprite icon;
 
     // droon.png is embedded in the DLL (csproj EmbeddedResource), so the mod stays a single file
@@ -26,9 +26,11 @@ public class DronesApp : PhoneApp
         if (s == null) { Mod.Log("app icon resource missing"); return null; }
         var ms = new System.IO.MemoryStream(); s.CopyTo(ms);
         var bytes = ms.ToArray();
-        var tex = new Texture2D(2, 2);
+        var tex = new Texture2D(2, 2) { hideFlags = HideFlags.DontUnloadUnusedAsset }; // a save load unloads unused assets
         if (!tex.LoadImage(bytes)) return null;
-        return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+        var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+        sprite.hideFlags = HideFlags.DontUnloadUnusedAsset;
+        return sprite;
     }
 
     // Palette
