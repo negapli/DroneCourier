@@ -204,7 +204,12 @@ static class Courier
     static void Unlock(Drone d)
     {
         if (!locks.Remove(d, out var held)) return;
-        foreach (var s in held.slots) if (s != null && s.IsLocked) s.RemoveLock();
+        // Only our own lock: a worker may have locked the slot since (its reservation), and RemoveLock clears any lock
+        if (held.at == null) return; // storage picked up or destroyed: its slots (and locks) are gone with it
+        var owner = held.at.NetworkObject;
+        foreach (var s in held.slots)
+            if (s != null && s.ActiveLock != null && owner != null && s.ActiveLock.LockOwner != null && s.ActiveLock.LockOwner.Pointer == owner.Pointer)
+                s.RemoveLock();
     }
 
     // Puts what fits into the receiver; whatever doesn't fit stays in the cargo.

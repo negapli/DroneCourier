@@ -77,19 +77,54 @@ static class Net
             case Op.Items: d.Items = arg == "" ? new() : new List<string>(arg.Split(',')); break;
             case Op.Retire: TechNerd.Retire(d); break;              // host only (Do never applies it on a client)
             case Op.Buy: Drones.Instance.Add((DroneSize)n); break;  // host only; the buyer already paid cash
-            case Op.Rename: d.CustomName = string.IsNullOrWhiteSpace(arg) ? null : arg.Trim(); break;
+            case Op.Rename: arg = arg.Replace("<", "").Replace(">", "").Trim(); d.CustomName = arg == "" ? null : arg; break; // no rich-text tags from anyone
         }
     }
 
-    // Host: an edit from a client
+    // Host: an edit from a client. SteamNetworkLib accepts P2P from any Steam user, so only lobby members count, and
+    // every value is checked as if the app hadn't (a modified client could send anything).
     static void OnCommand(DroneCmdMessage msg, CSteamID from)
     {
-        if (!InstanceFinder.IsServer || Drones.Instance == null || msg.Payload is not DroneCmd c) return;
-        var op = (Op)c.Op;
-        var d = Drones.Instance.Owned.Find(x => x.Id == c.DroneId);
-        if (d == null && op != Op.Buy) return; // drone gone meanwhile
-        Mod.Log($"client {from.m_SteamID}: {op} {d?.Name} {c.Arg}");
-        Apply(d, op, c.Arg);
+        try
+        {
+            if (!InstanceFinder.IsServer || Drones.Instance == null || msg.Payload is not DroneCmd c) return;
+            if (!steam.GetLobbyMembers().Exists(m => m.SteamId == from)) { Mod.Log($"net: ignored a command from {from.m_SteamID}, not in the lobby"); return; }
+            var op = (Op)c.Op;
+            string arg = c.Arg ?? "";
+            var d = Drones.Instance.Owned.Find(x => x.Id == c.DroneId);
+            if (d == null && op != Op.Buy) return; // drone gone meanwhile
+            if (!Valid(d, op, arg)) { Mod.Log($"net: rejected {op} {d?.Name} \"{Clip(arg)}\" from {from.m_SteamID}"); return; }
+            Mod.Log($"client {from.m_SteamID}: {op} {d?.Name} {arg}");
+            Apply(d, op, arg);
+        }
+        catch (Exception e) { Mod.Log($"net: command failed: {e.Message}"); }
+    }
+
+    static string Clip(string s) { s = s.Replace('\n', ' ').Replace('\r', ' '); return s.Length > 40 ? s.Substring(0, 40) + "…" : s; } // one log line, short
+
+    // The same limits the app enforces
+    static bool Valid(Drone d, Op op, string arg)
+    {
+        bool num = int.TryParse(arg, out int n);
+        switch (op)
+        {
+            case Op.Sender: case Op.Receiver:
+                if (arg == "") return true;
+                string other = op == Op.Sender ? d.Receiver : d.Sender;
+                return arg != other && Courier.Find(arg) != null;
+            case Op.Trigger: return num && Enum.IsDefined(typeof(Trigger), n);
+            case Op.Mode: return num && Enum.IsDefined(typeof(Mode), n);
+            case Op.Stacks: return num && n >= 1 && n <= d.Spec.Stacks;
+            case Op.Every: return num && n >= 10 && n <= 24 * 60;
+            case Op.Items:
+                if (arg == "") return true;
+                var ids = arg.Split(',');
+                return ids.Length <= 64 && Array.TrueForAll(ids, id => Il2CppScheduleOne.Registry.GetItem(id) != null);
+            case Op.Rename: return arg.Trim().Length <= DronesApp.NameLength && arg.IndexOfAny(new[] { '\n', '\r' }) < 0; // Apply strips rich-text tags
+            case Op.Retire: return d.Cargo.Count == 0; // the app waits for delivery too: cargo would be lost
+            case Op.Buy: return num && Enum.IsDefined(typeof(DroneSize), n) && Drones.Instance.Owned.Count < Drones.Max;
+            default: return false;
+        }
     }
 
     // --- client side ---
@@ -104,7 +139,8 @@ static class Net
     static void Receive()
     {
         var data = steam.GetLobbyData(StateKey);
-        if (string.IsNullOrEmpty(data) || data == lastState || Drones.Instance == null) return;
+        if (string.IsNullOrEmpty(data) || Drones.Instance == null) return;
+        if (data == lastState && editedAt.Count == 0) return; // after our own edit, re-apply even unchanged data: the host may have rejected it
         lastState = data;
         var list = JArray.Parse(Unzip(data));
         var owned = Drones.Instance.Owned;
@@ -121,6 +157,9 @@ static class Net
             JsonConvert.PopulateObject(o.ToString(), d, Replace);
         }
         owned.RemoveAll(d => !ids.Contains(d.Id));
+        var expired = new List<string>();
+        foreach (var (id, t) in editedAt) if (UnityEngine.Time.time - t >= 3f) expired.Add(id);
+        foreach (var id in expired) editedAt.Remove(id);
     }
 
     // Lists replaced, not appended to (Newtonsoft's default fills existing lists)

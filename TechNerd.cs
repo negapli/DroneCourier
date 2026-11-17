@@ -50,6 +50,7 @@ public sealed class TechNerd : NPC
             });
             c.AddNode("SOLD", "Nice doing business. It's in your Drones app.");
             c.AddNode("BROKE", "Come back when you're a little... mmmm... richer.");
+            c.AddNode("FULL", $"You've got {Drones.Max} drones already. Give one back first.");
             foreach (var (size, spec) in Drones.Specs)
                 c.AddNode("RANK_" + size, $"Not that one, not yet. Come back when you're a {spec.RankName}.");
             c.AddNode("EXIT", "Later.");
@@ -150,7 +151,6 @@ public sealed class TechNerd : NPC
     // "Stop using this drone" in the app: the drone goes back to Milo, who leaves part of its price as cash in a dead drop
     // and texts where. Same pick as supplier deliveries (an empty drop, not the nearest): it never lands in a drop that
     // holds a supplier's goods, and suppliers skip it while the cash is there (they only use empty drops).
-    // ponytail: host/singleplayer only for now; clients need this routed to the host (milestone 5)
     public static void Retire(Drone d)
     {
         float back = Refund(d);
@@ -184,6 +184,7 @@ public sealed class TechNerd : NPC
         var spec = Drones.Specs[size];
         var lm = Il2CppScheduleOne.DevUtilities.NetworkSingleton<Il2CppScheduleOne.Levelling.LevelManager>.Instance;
         if (lm != null && lm.Rank < spec.Rank) { Dialogue.JumpTo(Talk, "RANK_" + size); return; }
+        if (Drones.Instance != null && Drones.Instance.Owned.Count >= Drones.Max) { Dialogue.JumpTo(Talk, "FULL"); return; } // checked before taking the cash
         if (Money.GetCashBalance() < spec.Price) { Dialogue.JumpTo(Talk, "BROKE"); return; }
         Money.ChangeCashBalance(-spec.Price, visualizeChange: true, playCashSound: true);
         Net.Do(null, Op.Buy, ((int)size).ToString()); // host adds it now; a co-op client asks the host

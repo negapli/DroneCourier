@@ -53,6 +53,7 @@ public class DronesApp : PhoneApp
     Drone shown;
     bool wasOpen;
     Drone confirmStop;
+    public const int NameLength = 24;
     InputField nameField; // drone screen: rename
     static bool typing;   // we told the game the player is typing (no walking/hotbar while the name field is focused) // first tap on "Stop using this drone" arms it, second tap confirms
     float? keepY; // scroll position to restore when the same screen is redrawn (a tap on +/-, an item toggle)
@@ -404,7 +405,7 @@ public class DronesApp : PhoneApp
         text.supportRichText = false;
         var f = go.AddComponent<InputField>();
         f.textComponent = text; f.placeholder = hint;
-        f.characterLimit = 24; f.lineType = InputField.LineType.SingleLine;
+        f.characterLimit = NameLength; f.lineType = InputField.LineType.SingleLine;
         f.text = value;
         return f;
     }

@@ -72,6 +72,7 @@ public class Drones : Saveable
         [DroneSize.Huge] = new("Huge drone", 20, 45000f, ERank.Shot_Caller),          // huge closet
     };
 
+    public const int Max = 50; // the drone list syncs as Steam lobby data (8 KB; ~100 bytes per drone)
     public static Drones Instance { get; private set; }
 
     [SaveableField("drones")] public List<Drone> Owned = new();
