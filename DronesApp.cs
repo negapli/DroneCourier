@@ -85,6 +85,9 @@ public class DronesApp : PhoneApp
     {
         var f = instance?.nameField;
         bool now = f != null && f.isFocused;
+        // Phone put away (storage pick, phone closed) with the field focused: it kept eating ZQSD/WASD and blocked moving
+        var phone = Il2CppScheduleOne.DevUtilities.PlayerSingleton<Il2CppScheduleOne.UI.Phone.Phone>.Instance;
+        if (now && (!instance.IsOpen() || phone == null || !phone.IsOpen)) { f.DeactivateInputField(); now = false; }
         if (now == typing) return;
         typing = now;
         Il2CppScheduleOne.GameInput.IsTyping = now;

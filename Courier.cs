@@ -29,11 +29,17 @@ static class Courier
         var list = new List<Storage>();
         foreach (var prop in Property.OwnedProperties)
         {
-            var seen = new Dictionary<string, int>();
+            // Sorted by GUID: the game's BuildableItems order differs between host and clients, so "#2" must not depend on it
+            var found = new List<PlaceableStorageEntity>();
             foreach (var b in prop.BuildableItems)
             {
                 var s = b?.TryCast<PlaceableStorageEntity>();
-                if (s == null || !Kinds.Contains(s.ItemInstance?.ID ?? "")) continue;
+                if (s != null && Kinds.Contains(s.ItemInstance?.ID ?? "")) found.Add(s);
+            }
+            found.Sort((a, b) => string.CompareOrdinal(a.GUID.ToString(), b.GUID.ToString()));
+            var seen = new Dictionary<string, int>();
+            foreach (var s in found)
+            {
                 string name = s.Name;
                 seen[name] = seen.TryGetValue(name, out int n) ? n + 1 : 1;
                 list.Add(new(s.GUID.ToString(), $"{prop.PropertyName} · {name}{(seen[name] > 1 ? $" #{seen[name]}" : "")}", s, prop.PropertyCode));
