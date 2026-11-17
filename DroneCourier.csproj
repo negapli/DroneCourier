@@ -20,6 +20,9 @@
     <!-- SteamNetworkLib (ifBars) Il2Cpp build, installed from Thunderstore into <game>/UserLibs -->
     <Reference Include="$(SteamNetworkLibDll)" Private="false" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="droon.png" LogicalName="DroneCourier.droon.png" />
+  </ItemGroup>
   <Target Name="Deploy" AfterTargets="Build">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)/Mods" />
   </Target>

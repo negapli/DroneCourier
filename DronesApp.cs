@@ -15,7 +15,21 @@ public class DronesApp : PhoneApp
     protected override string AppName => "DroneCourier";
     protected override string AppTitle => "Drones";
     protected override string IconLabel => "Drones";
-    protected override string IconFileName => "DroneCourier.png"; // ponytail: no icon shipped yet, S1API keeps its default
+    protected override string IconFileName => "DroneCourier.png"; // unused: IconSprite below wins
+    protected override Sprite IconSprite => icon ??= LoadIcon();
+    static Sprite icon;
+
+    // droon.png is embedded in the DLL (csproj EmbeddedResource), so the mod stays a single file
+    static Sprite LoadIcon()
+    {
+        using var s = typeof(DronesApp).Assembly.GetManifestResourceStream("DroneCourier.droon.png");
+        if (s == null) { Mod.Log("app icon resource missing"); return null; }
+        var ms = new System.IO.MemoryStream(); s.CopyTo(ms);
+        var bytes = ms.ToArray();
+        var tex = new Texture2D(2, 2);
+        if (!tex.LoadImage(bytes)) return null;
+        return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+    }
 
     // Palette
     static readonly Color Bg = new(0.07f, 0.08f, 0.10f), Header = new(0.10f, 0.11f, 0.14f), Card = new(0.13f, 0.15f, 0.19f),

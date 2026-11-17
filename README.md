@@ -49,6 +49,7 @@ The build copies `DroneCourier.dll` into `<game>/Mods/`.
 ## Credits
 - [MelonLoader](https://github.com/LavaGang/MelonLoader) (LavaGang)
 - [S1API](https://github.com/ifBars/S1API) and [SteamNetworkLib](https://github.com/ifBars/SteamNetworkLib) by ifBars
+- App icon art by [ReyShikufu](https://github.com/ReyShikufu)
 - Built with Claude Code (Anthropic's Claude Opus) as the coding agent, directed and play-tested by pligane.
 - No game files or game assets are included; Milo is built from the game's own avatar parts at runtime.
 
