@@ -18,7 +18,7 @@ A Schedule I mod: buy delivery drones from **Milo Byte**, a tech nerd who hangs 
 - **Item filters**: choose which items a drone carries, with the game's item icons. Several drones can share one rack if their items don't overlap; a drone with no filter takes the rest.
 - Drones are invisible: a trip takes 10 s to load, distance / 10 m/s each way, and 10 s to unload. Goods in flight are saved with your game. A full receiver makes the drone wait; nothing is lost.
 - **Rename** your drones.
-- **Give a drone back**: Milo leaves half its price as cash in a dead drop and texts you where.
+- **Give a drone back**: Milo leaves half its price as cash in a dead drop and texts you where (or pays it to your bank if no dead drop is free).
 
 ## Requirements
 - Schedule I **0.4.7** (IL2CPP, the default Steam branch)
@@ -34,7 +34,7 @@ A Schedule I mod: buy delivery drones from **Milo Byte**, a tech nerd who hangs 
 Uninstall: delete `Mods/DroneCourier.dll`. Your drones are stored in the save's `Modded` folder and are ignored without the mod.
 
 ## Multiplayer (experimental)
-Every player needs DroneCourier, S1API and SteamNetworkLib. The host owns the drones and runs the trips; clients see them in their app and can buy, set up and give back drones. Client changes take about 1-2 seconds to show. Co-op has not been fully tested yet: please report what you find.
+Every player needs the same DroneCourier version, S1API and SteamNetworkLib. The host owns the drones and runs the trips; clients see them in their app and can buy, set up and give back drones. Client changes take about 1-2 seconds to show. Tested with two players (buying, setting up and running drones from the client); please report anything odd.
 
 ## Troubleshooting
 The log is `<Schedule I>/MelonLoader/Latest.log`; DroneCourier lines start with `[DroneCourier]`. Please attach it to bug reports.
@@ -50,8 +50,12 @@ The build copies `DroneCourier.dll` into `<game>/Mods/`.
 - [MelonLoader](https://github.com/LavaGang/MelonLoader) (LavaGang)
 - [S1API](https://github.com/ifBars/S1API) and [SteamNetworkLib](https://github.com/ifBars/SteamNetworkLib) by ifBars
 - App icon art by [ReyShikufu](https://github.com/ReyShikufu)
-- Built with Claude Code (Anthropic's Claude Opus) as the coding agent, directed and play-tested by pligane.
 - No game files or game assets are included; Milo is built from the game's own avatar parts at runtime.
+
+## AI disclosure
+- **Code and text** (including Milo's dialogue and texts): written by an AI coding agent (Claude Code, Anthropic's Claude Opus) under the direction of pligane, who designed the mod and play-tested every feature in game, solo and in co-op.
+- **App icon**: human-made art by [ReyShikufu](https://github.com/ReyShikufu).
+- **Milo's look**: built at runtime from the game's own avatar parts. No AI-generated images or audio.
 
 ## License
 MIT, see [LICENSE](LICENSE).
