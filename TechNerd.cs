@@ -186,9 +186,10 @@ public sealed class TechNerd : NPC
         if (lm != null && lm.Rank < spec.Rank) { Dialogue.JumpTo(Talk, "RANK_" + size); return; }
         if (Drones.Instance != null && Drones.Instance.Owned.Count >= Drones.Max) { Dialogue.JumpTo(Talk, "FULL"); return; } // checked before taking the cash
         if (Money.GetCashBalance() < spec.Price) { Dialogue.JumpTo(Talk, "BROKE"); return; }
+        if (Net.IsClient && !Net.CanReachHost) { Mod.Notify("Drones", "Not connected to the host: try again in a moment."); return; } // before paying
         Money.ChangeCashBalance(-spec.Price, visualizeChange: true, playCashSound: true);
         Net.Do(null, Op.Buy, ((int)size).ToString()); // host adds it now; a co-op client asks the host
-        Mod.Log($"bought a {spec.Name} for ${spec.Price}; now {Drones.Instance.Owned.Count} drone(s)");
+        Mod.Log(Net.IsClient ? $"asked the host for a {spec.Name} (paid ${spec.Price})" : $"bought a {spec.Name} for ${spec.Price}; now {Drones.Instance?.Owned.Count} drone(s)");
     }
 }
 

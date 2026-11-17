@@ -1,6 +1,6 @@
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(DroneCourier.Mod), "DroneCourier", "0.1.5", "pligane")]
+[assembly: MelonInfo(typeof(DroneCourier.Mod), "DroneCourier", "0.1.6", "pligane")]
 [assembly: MelonGame("TVGS", "Schedule I")]
 
 namespace DroneCourier;
@@ -22,12 +22,26 @@ public class Mod : MelonMod
     float nextCheck, nextTick, nextPlace;
     public override void OnUpdate()
     {
-        if (UnityEngine.Time.time >= nextPlace) { nextPlace = UnityEngine.Time.time + 0.5f; TechNerd.KeepInPlace(); } // fast: after a load he spawns at 0,0,0 until we move him
-        if (UnityEngine.Time.time >= nextCheck) { nextCheck = UnityEngine.Time.time + 5f; TechNerd.Redress(); }
-        WorldPicker.Update();
-        Net.Update();
-        DronesApp.TypingUpdate();
-        if (UnityEngine.Time.time >= nextTick) { nextTick = UnityEngine.Time.time + 1f; Courier.Tick(1f); Net.Tick(); DronesApp.Refresh(); }
+        float now = UnityEngine.Time.time;
+        if (now >= nextPlace) { nextPlace = now + 0.5f; Safe(TechNerd.KeepInPlace, "Milo"); } // fast: after a load he spawns at 0,0,0 until we move him
+        if (now >= nextCheck) { nextCheck = now + 5f; Safe(TechNerd.Redress, "Milo outfit"); }
+        Safe(WorldPicker.Update, "picker");
+        Safe(Net.Update, "net");
+        Safe(DronesApp.TypingUpdate, "app typing");
+        if (now >= nextTick) { nextTick = now + 1f; Safe(() => Courier.Tick(1f), "trips"); Safe(Net.Tick, "sync"); Safe(DronesApp.Refresh, "app"); }
+    }
 
+    // One failing part must not stop the others (an exception ends OnUpdate). Logged once a minute per part, not every frame.
+    static readonly System.Collections.Generic.Dictionary<string, float> lastError = new();
+    static void Safe(System.Action a, string part)
+    {
+        try { a(); }
+        catch (System.Exception e)
+        {
+            float now = UnityEngine.Time.time;
+            if (lastError.TryGetValue(part, out var t) && now - t < 60f) return;
+            lastError[part] = now;
+            Log($"error in {part}: {e}");
+        }
     }
 }

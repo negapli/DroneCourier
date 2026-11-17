@@ -20,7 +20,7 @@ public enum Op { Sender, Receiver, Trigger, Stacks, Every, Mode, Items, Retire, 
 //  - client -> host: one typed P2P message per edit (DroneCmdMessage).
 // Every change to a drone goes through Do(): the host applies it, a client applies it locally (so the app reacts at
 // once) and sends it to the host. Singleplayer = host with no lobby.
-// ponytail: the host trusts clients' edits (they ran the same checks on their synced copy).
+// The host checks every client edit (Valid) and only accepts lobby members.
 static class Net
 {
     const string StateKey = "dronecourier";
@@ -28,6 +28,8 @@ static class Net
     static SteamNetworkClient steam;
     public static bool IsClient => !InstanceFinder.IsServer && InstanceFinder.IsClient;
     static bool Online => steam != null && steam.IsInLobby;
+    /// A co-op client can send edits (and should pay for a drone) only while it sees the host.
+    public static bool CanReachHost => Online && steam.GetHostMember() != null;
 
     // --- setup: the library must start before the game joins a lobby (it watches Steam's lobby-entered event) ---
 
@@ -54,9 +56,10 @@ static class Net
     public static void Do(Drone d, Op op, string arg = "")
     {
         if (!IsClient) { Apply(d, op, arg); return; }
-        if (op is not (Op.Retire or Op.Buy)) { Apply(d, op, arg); editedAt[d.Id] = UnityEngine.Time.time; } // optimistic
+        string cmdId = Guid.NewGuid().ToString("N");
+        if (op is not (Op.Retire or Op.Buy)) { Apply(d, op, arg); pending[d.Id] = (cmdId, UnityEngine.Time.time); } // optimistic, kept until the host confirms
         if (!Online || steam.GetHostMember() is not MemberInfo host) { Mod.Log($"net: not in a lobby, {op} not sent"); return; }
-        var msg = new DroneCmdMessage(new DroneCmd { Op = (int)op, DroneId = d?.Id ?? "", Arg = arg });
+        var msg = new DroneCmdMessage(new DroneCmd { Op = (int)op, DroneId = d?.Id ?? "", Arg = arg, CmdId = cmdId });
         steam.SendMessageToPlayerAsync(host.SteamId, msg).ContinueWith(t =>
         {
             if (t.IsFaulted || !t.Result) Mod.Log($"net: sending {op} to the host failed {t.Exception?.GetBaseException().Message}");
@@ -93,6 +96,7 @@ static class Net
             string arg = c.Arg ?? "";
             var d = Drones.Instance.Owned.Find(x => x.Id == c.DroneId);
             if (d == null && op != Op.Buy) return; // drone gone meanwhile
+            if (d != null) acked[d.Id] = c.CmdId ?? ""; // published with the list: the sender stops overriding it
             if (!Valid(d, op, arg)) { Mod.Log($"net: rejected {op} {d?.Name} \"{Clip(arg)}\" from {from.m_SteamID}"); return; }
             Mod.Log($"client {from.m_SteamID}: {op} {d?.Name} {arg}");
             Apply(d, op, arg);
@@ -129,7 +133,8 @@ static class Net
 
     // --- client side ---
 
-    static readonly Dictionary<string, float> editedAt = new(); // drone id -> time of our last local edit
+    // drone id -> our last edit, shown locally until the host's list carries its id (Steam lobby data can lag several seconds)
+    static readonly Dictionary<string, (string id, float at)> pending = new();
     static readonly Dictionary<string, string> statuses = new(); // drone id -> host's status line
 
     /// The host's status line for a drone (clients don't run the trips), or null.
@@ -140,7 +145,7 @@ static class Net
     {
         var data = steam.GetLobbyData(StateKey);
         if (string.IsNullOrEmpty(data) || Drones.Instance == null) return;
-        if (data == lastState && editedAt.Count == 0) return; // after our own edit, re-apply even unchanged data: the host may have rejected it
+        if (data == lastState && pending.Count == 0) return;
         lastState = data;
         var list = JArray.Parse(Unzip(data));
         var owned = Drones.Instance.Owned;
@@ -151,15 +156,19 @@ static class Net
             ids.Add(id);
             statuses[id] = (string)o["Status"];
             o.Remove("Status");
+            string ack = (string)o["Ack"] ?? ""; o.Remove("Ack");
             var d = owned.Find(x => x.Id == id);
             if (d == null) owned.Add(d = new Drone());
-            else if (editedAt.TryGetValue(id, out var t) && UnityEngine.Time.time - t < 3f) continue; // don't undo our own fresh edit
+            else if (pending.TryGetValue(id, out var p))
+            {
+                if (ack != p.id && UnityEngine.Time.time - p.at < 15f) continue; // host hasn't confirmed it yet: keep showing our edit
+                pending.Remove(id); // confirmed (applied or rejected), or lost: the host's values win
+            }
             JsonConvert.PopulateObject(o.ToString(), d, Replace);
+            d.Repair();
         }
         owned.RemoveAll(d => !ids.Contains(d.Id));
-        var expired = new List<string>();
-        foreach (var (id, t) in editedAt) if (UnityEngine.Time.time - t >= 3f) expired.Add(id);
-        foreach (var id in expired) editedAt.Remove(id);
+        foreach (var id in new List<string>(pending.Keys)) if (!ids.Contains(id)) pending.Remove(id);
     }
 
     // Lists replaced, not appended to (Newtonsoft's default fills existing lists)
@@ -168,6 +177,7 @@ static class Net
     // --- host side ---
 
     static string lastPublished;
+    static readonly Dictionary<string, string> acked = new(); // drone id -> last client command handled (host)
     static void Publish()
     {
         var list = new JArray();
@@ -178,6 +188,7 @@ static class Net
             foreach (var c in d.Cargo) ids.Add(Courier.CargoId(c)); // item ids only: clients just count them
             o["Cargo"] = ids;
             o["Status"] = Courier.Status(d);
+            o["Ack"] = acked.TryGetValue(d.Id, out var ack) ? ack : "";
             list.Add(o);
         }
         string data = Zip(list.ToString(Formatting.None));
@@ -194,7 +205,8 @@ static class Net
         // A co-op client never loads the save, so S1API never creates Drones there: make the mirror of the host's list.
         // (If the client later loads its own save, S1API's instance replaces it via the constructor.)
         if (Drones.Instance == null && IsClient) new Drones();
-        if (Drones.Instance == null || !Online) return;
+        if (!Online) { lastPublished = lastState = null; return; } // a new lobby must get the list even if it didn't change
+        if (Drones.Instance == null) return;
         try
         {
             if (InstanceFinder.IsServer) Publish();
@@ -224,6 +236,7 @@ public class DroneCmd
     public int Op { get; set; }
     public string DroneId { get; set; } = "";
     public string Arg { get; set; } = "";
+    public string CmdId { get; set; } = ""; // echoed back by the host as "Ack"
 }
 
 public class DroneCmdMessage : TypedP2PMessage<DroneCmd>

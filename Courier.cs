@@ -24,8 +24,13 @@ static class Courier
     };
 
     /// Every rack/closet in the player's properties, labelled "Property · Name" (numbered when names repeat).
+    // Cached per frame: Find runs for every drone and app row each second, and each scan walks every placed object.
+    static List<Storage> cache;
+    static int cacheFrame = -1;
+
     public static List<Storage> All()
     {
+        if (cacheFrame == Time.frameCount && cache != null) return cache;
         var list = new List<Storage>();
         foreach (var prop in Property.OwnedProperties)
         {
@@ -45,7 +50,8 @@ static class Courier
                 list.Add(new(s.GUID.ToString(), $"{prop.PropertyName} · {name}{(seen[name] > 1 ? $" #{seen[name]}" : "")}", s, prop.PropertyCode));
             }
         }
-        return list;
+        cacheFrame = Time.frameCount;
+        return cache = list;
     }
 
     public static Storage Find(string guid)

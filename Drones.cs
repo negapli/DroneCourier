@@ -52,6 +52,19 @@ public class Drone
         return null;
     }
 
+    /// Values this version can't use (a newer version's save or host, a hand-edited file) would throw every tick: reset them.
+    public void Repair()
+    {
+        if (string.IsNullOrEmpty(Id)) Id = Guid.NewGuid().ToString("N");
+        if (!Enum.IsDefined(typeof(DroneSize), Size)) { Mod.Log($"drone {Id}: unknown size {(int)Size}, using Small"); Size = DroneSize.Small; }
+        if (!Enum.IsDefined(typeof(Trigger), Trigger)) Trigger = Trigger.WhenFull;
+        if (!Enum.IsDefined(typeof(Mode), Mode)) Mode = Mode.Off;
+        if (!Enum.IsDefined(typeof(Leg), Leg)) Leg = Leg.AtSender;
+        Cargo ??= new(); Items ??= new();
+        TriggerStacks = Math.Clamp(TriggerStacks, 1, Spec.Stacks);
+        EveryMinutes = Math.Clamp(EveryMinutes, 10, 24 * 60);
+    }
+
     // Not saved: computed. Saving Spec let the JSON loader write old saved prices INTO the shared price table.
     [Newtonsoft.Json.JsonIgnore] public DroneSpec Spec => Drones.Specs[Size];
     public string CustomName;             // set in the app; null = "Small drone #2"
@@ -82,7 +95,7 @@ public class Drones : Saveable
     public Drone Add(DroneSize size)
     {
         int n = 1;
-        foreach (var d in Owned) if (d.Size == size) n++;
+        foreach (var d in Owned) if (d.Size == size && d.Number >= n) n = d.Number + 1; // max + 1: no duplicate "#2" after a give-back
         var drone = new Drone { Size = size, Number = n, Paid = Specs[size].Price };
         Owned.Add(drone);
         return drone;
@@ -93,6 +106,9 @@ public class Drones : Saveable
 
     protected override void OnLoaded()
     {
+        Owned ??= new();
+        Owned.RemoveAll(d => d == null);
+        foreach (var d in Owned) d.Repair();
         Courier.OnLoad();
         Mod.Log($"loaded {Owned.Count} drone(s)");
     }

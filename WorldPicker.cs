@@ -40,7 +40,10 @@ static class WorldPicker
 
     public static void Update()
     {
-        if (drone == null || Time.time < startAt) return;
+        if (drone == null) return;
+        // The save unloaded (quit, reload) or the drone was given back mid-pick: stop quietly
+        if (Drones.Instance == null || !Drones.Instance.Owned.Contains(drone)) { End(reopenPhone: false); return; }
+        if (Time.time < startAt) return;
         // ponytail: only the storage menu is watched; add other menus (stations, dialogue) if they overlap too
         if (Singleton<StorageMenu>.Instance?.IsOpen == true) { End(reopenPhone: false); Mod.Notify("Drones", "Selection cancelled."); return; } // E on a storage: let its menu own Esc
         if (Input.GetMouseButtonDown(1)) { Cancel(); return; }
@@ -79,7 +82,7 @@ static class WorldPicker
         GameInput.DeregisterExitListener(onExit); // safe inside the listener: the game stops iterating once Used
         if (hovered != null) { hovered.HideOutline(); hovered = null; }
         Singleton<HUD>.Instance?.HideTopScreenText();
-        selector?.State.RemoveFromDefaultParent();
+        if (selector != null) selector.State.RemoveFromDefaultParent(); // Unity null check: destroyed with the scene
         if (reopenPhone) Singleton<GameplayMenu>.Instance?.Open(); // phone back up on the Drones app (after the selector state is gone, same stack rule)
         drone = null;
     }
