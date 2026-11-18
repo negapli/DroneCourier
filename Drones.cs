@@ -102,7 +102,19 @@ public class Drones : Saveable
     }
 
     // S1API keeps one instance per game session: a save with no drone data must not inherit the last save's (or host's) drones.
-    protected override void OnCreated() => Owned = new();
+    protected override void OnCreated()
+    {
+        if (SaveHasData(nameof(Drones))) { Mod.Log("ignored S1API's no-data init: this save has drone data (already loaded)"); return; }
+        Owned = new();
+    }
+    // S1API's "end of load" listener isn't removed under IL2CPP: after one load without our data it fires again at the
+    // end of every later load in the session, right after OnLoaded. Only treat it as "no data" if the save really has none.
+    static bool SaveHasData(string cls)
+    {
+        var folder = Il2CppScheduleOne.Persistence.LoadManager.Instance?.LoadedGameFolderPath;
+        return folder != null && System.IO.Directory.Exists(System.IO.Path.Combine(folder, "Modded", "Saveables", cls));
+    }
+
 
     protected override void OnLoaded()
     {
