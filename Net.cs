@@ -28,7 +28,9 @@ static class Net
     const string StateKey = "dronecourier", CmdsKey = "dronecourier_cmds", AcksKey = "dronecourier_acks";
 
     static SteamNetworkClient steam;
-    public static bool IsClient => !InstanceFinder.IsServer && InstanceFinder.IsClient;
+    /// A co-op client: in someone else's lobby and not the server. (FishNet alone isn't enough: while a save loads the
+    /// host briefly reports IsServer false, and could then overwrite its loaded drones with the lobby's copy.)
+    public static bool IsClient => Online && !steam.IsHost && !InstanceFinder.IsServer;
     static bool Online => steam != null && steam.IsInLobby;
     /// A co-op client can send edits (and should pay for a drone) only while it sees the host.
     public static bool CanReachHost => Online && steam.GetHostMember() != null;
@@ -255,8 +257,8 @@ static class Net
         if (Drones.Instance == null) return;
         try
         {
-            if (InstanceFinder.IsServer) { Publish(); ReadCommands(); }
-            else if (InstanceFinder.IsClient) { Receive(); ReadAck(); }
+            if (IsClient) { Receive(); ReadAck(); }
+            else if (InstanceFinder.IsServer) { Publish(); ReadCommands(); }
         }
         catch (Exception e) { Mod.Log($"net: {e.Message}"); }
     }
