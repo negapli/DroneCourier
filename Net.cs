@@ -6,7 +6,6 @@ using System.Text;
 using Il2CppFishNet;
 using Il2CppSteamworks;
 using SteamNetworkLib;
-using SteamNetworkLib.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -17,13 +16,16 @@ public enum Op { Sender, Receiver, Trigger, Stacks, Every, Mode, Items, Retire, 
 // Multiplayer with SteamNetworkLib (ifBars, the S1API author; what other Schedule I mods use), over the game's Steam lobby.
 // The host owns the drones (save, trips, refunds).
 //  - host -> everyone: lobby data "dronecourier" = the drone list (gzip+base64 JSON), republished when it changes.
-//  - client -> host: one typed P2P message per edit (DroneCmdMessage).
+//  - client -> host: the client's own player data "dronecourier_cmds" = its unconfirmed edits, numbered (Seq) within a
+//    random session id; the host applies the new ones in order and publishes the last Seq it handled per player in
+//    lobby data "dronecourier_acks"; the client then drops those. No P2P: every SteamNetworkLib client reads ALL P2P
+//    packets (channels 0-3), so two mods using P2P steal each other's messages.
 // Every change to a drone goes through Do(): the host applies it, a client applies it locally (so the app reacts at
 // once) and sends it to the host. Singleplayer = host with no lobby.
-// The host checks every client edit (Valid) and only accepts lobby members.
+// The host checks every client edit (Valid) and only reads lobby members' data.
 static class Net
 {
-    const string StateKey = "dronecourier";
+    const string StateKey = "dronecourier", CmdsKey = "dronecourier_cmds", AcksKey = "dronecourier_acks";
 
     static SteamNetworkClient steam;
     public static bool IsClient => !InstanceFinder.IsServer && InstanceFinder.IsClient;
@@ -42,11 +44,9 @@ static class Net
             nextTry = UnityEngine.Time.time + 2f; // Steam may not be ready during the first frames
             var c = new SteamNetworkClient();
             if (!c.TryInitialize(out var error)) { Mod.Log($"net: SteamNetworkLib not ready ({error?.Message})"); return; }
-            c.RegisterMessageHandler<DroneCmdMessage>(OnCommand);
-            steam = c;
+            steam = c; // no ProcessIncomingMessages: no P2P here, and reading packets would take other mods' messages
             Mod.Log("net: SteamNetworkLib ready");
         }
-        steam.ProcessIncomingMessages(); // runs handlers on the main thread
     }
 
     public static void Shutdown() { steam?.Dispose(); steam = null; }
@@ -58,13 +58,60 @@ static class Net
         if (!IsClient) { Apply(d, op, arg); return; }
         string cmdId = Guid.NewGuid().ToString("N");
         if (op is not (Op.Retire or Op.Buy)) { Apply(d, op, arg); pending[d.Id] = (cmdId, UnityEngine.Time.time); } // optimistic, kept until the host confirms
-        if (!Online || steam.GetHostMember() is not MemberInfo host) { Mod.Log($"net: not in a lobby, {op} not sent"); return; }
-        var msg = new DroneCmdMessage(new DroneCmd { Op = (int)op, DroneId = d?.Id ?? "", Arg = arg, CmdId = cmdId });
-        steam.SendMessageToPlayerAsync(host.SteamId, msg).ContinueWith(t =>
-        {
-            if (t.IsFaulted || !t.Result) Mod.Log($"net: sending {op} to the host failed {t.Exception?.GetBaseException().Message}");
-        });
+        if (!Online || steam.GetHostMember() == null) { Mod.Log($"net: not in a lobby, {op} not sent"); return; }
+        queue.Add(new DroneCmd { Seq = ++seq, Op = (int)op, DroneId = d?.Id ?? "", Arg = arg, CmdId = cmdId });
+        if (queue.Count > MaxQueue) { Mod.Log($"net: {queue.Count} edits unconfirmed by the host, dropping the oldest"); queue.RemoveAt(0); }
+        WriteQueue();
     }
+
+    // --- client -> host queue ---
+
+    const int MaxQueue = 30; // player data is small; the host normally confirms within a second
+    static readonly string session = Guid.NewGuid().ToString("N").Substring(0, 8); // a restarted client starts over
+    static int seq;
+    static readonly List<DroneCmd> queue = new();
+    static void WriteQueue() =>
+        steam.SetMyData(CmdsKey, queue.Count == 0 ? "" : JsonConvert.SerializeObject(new CmdBatch { Session = session, Cmds = queue }));
+
+    // Client: drop the edits the host has handled.
+    static void ReadAck()
+    {
+        if (queue.Count == 0) return;
+        var acks = steam.GetLobbyData(AcksKey);
+        if (string.IsNullOrEmpty(acks)) return;
+        var mine = (string)JObject.Parse(acks)[steam.LocalPlayerId.m_SteamID.ToString()];
+        if (mine == null || !mine.StartsWith(session + ":") || !int.TryParse(mine.Substring(session.Length + 1), out int done)) return;
+        if (queue.RemoveAll(c => c.Seq <= done) > 0) WriteQueue();
+    }
+
+    // Host: each member's session and last handled Seq.
+    static readonly Dictionary<ulong, (string session, int seq)> handled = new();
+    static void ReadCommands()
+    {
+        foreach (var m in steam.GetLobbyMembers())
+        {
+            if (m.IsLocalPlayer) continue;
+            var data = steam.GetPlayerData(m.SteamId, CmdsKey);
+            if (string.IsNullOrEmpty(data)) continue;
+            CmdBatch batch;
+            try { batch = JsonConvert.DeserializeObject<CmdBatch>(data); } catch { continue; }
+            if (batch?.Cmds == null || string.IsNullOrEmpty(batch.Session)) continue;
+            ulong who = m.SteamId.m_SteamID;
+            if (!handled.TryGetValue(who, out var h) || h.session != batch.Session) h = (batch.Session, 0);
+            foreach (var c in batch.Cmds)
+            {
+                if (c == null || c.Seq <= h.seq) continue;
+                h.seq = c.Seq;
+                OnCommand(c, m.SteamId);
+            }
+            handled[who] = h;
+        }
+        var acks = new JObject();
+        foreach (var kv in handled) acks[kv.Key.ToString()] = $"{kv.Value.session}:{kv.Value.seq}";
+        string a = acks.ToString(Formatting.None);
+        if (a != lastAcks) { lastAcks = a; steam.SetLobbyData(AcksKey, a); }
+    }
+    static string lastAcks;
 
     static void Apply(Drone d, Op op, string arg)
     {
@@ -84,14 +131,13 @@ static class Net
         }
     }
 
-    // Host: an edit from a client. SteamNetworkLib accepts P2P from any Steam user, so only lobby members count, and
+    // Host: an edit from a client (read from a lobby member's player data, so only members can send any), and
     // every value is checked as if the app hadn't (a modified client could send anything).
-    static void OnCommand(DroneCmdMessage msg, CSteamID from)
+    static void OnCommand(DroneCmd c, CSteamID from)
     {
         try
         {
-            if (!InstanceFinder.IsServer || Drones.Instance == null || msg.Payload is not DroneCmd c) return;
-            if (!steam.GetLobbyMembers().Exists(m => m.SteamId == from)) { Mod.Log($"net: ignored a command from {from.m_SteamID}, not in the lobby"); return; }
+            if (!InstanceFinder.IsServer || Drones.Instance == null) return;
             var op = (Op)c.Op;
             string arg = c.Arg ?? "";
             var d = Drones.Instance.Owned.Find(x => x.Id == c.DroneId);
@@ -205,12 +251,12 @@ static class Net
         // A co-op client never loads the save, so S1API never creates Drones there: make the mirror of the host's list.
         // (If the client later loads its own save, S1API's instance replaces it via the constructor.)
         if (Drones.Instance == null && IsClient) new Drones();
-        if (!Online) { lastPublished = lastState = null; return; } // a new lobby must get the list even if it didn't change
+        if (!Online) { lastPublished = lastState = lastAcks = null; handled.Clear(); return; } // a new lobby must get the list even if it didn't change
         if (Drones.Instance == null) return;
         try
         {
-            if (InstanceFinder.IsServer) Publish();
-            else if (InstanceFinder.IsClient) Receive();
+            if (InstanceFinder.IsServer) { Publish(); ReadCommands(); }
+            else if (InstanceFinder.IsClient) { Receive(); ReadAck(); }
         }
         catch (Exception e) { Mod.Log($"net: {e.Message}"); }
     }
@@ -230,18 +276,18 @@ static class Net
     }
 }
 
-// One drone edit, client -> host. Simple public get/set properties: SteamNetworkLib's IL2CPP-safe JSON.
+// One drone edit, client -> host (inside the client's CmdBatch player data).
 public class DroneCmd
 {
+    public int Seq { get; set; }            // order within the client's session; the host handles each Seq once
     public int Op { get; set; }
     public string DroneId { get; set; } = "";
     public string Arg { get; set; } = "";
-    public string CmdId { get; set; } = ""; // echoed back by the host as "Ack"
+    public string CmdId { get; set; } = ""; // echoed back by the host as the drone's "Ack"
 }
 
-public class DroneCmdMessage : TypedP2PMessage<DroneCmd>
+public class CmdBatch
 {
-    public override string MessageType => "DRONECOURIER_CMD";
-    public DroneCmdMessage() { }
-    public DroneCmdMessage(DroneCmd payload) : base(payload) { }
+    public string Session { get; set; } = "";
+    public List<DroneCmd> Cmds { get; set; } = new();
 }
