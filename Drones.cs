@@ -106,6 +106,7 @@ public class Drones : Saveable
     {
         if (SaveHasData(nameof(Drones))) { Mod.Log("ignored S1API's no-data init: this save has drone data (already loaded)"); return; }
         Owned = new();
+        Courier.OnLoad();
     }
     // S1API's "end of load" listener isn't removed under IL2CPP: after one load without our data it fires again at the
     // end of every later load in the session, right after OnLoaded. Only treat it as "no data" if the save really has none.

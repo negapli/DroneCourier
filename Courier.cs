@@ -97,12 +97,12 @@ static class Courier
         if (d.Leg == Leg.AtSender && d.Mode == Mode.Off) return;
         var from = Find(d.Sender); var to = Find(d.Receiver);
         bool carrying = d.Leg is Leg.ToReceiver or Leg.Unloading;
-        // Carrying only needs the receiver (cargo whose receiver is gone/cleared waits until a new one is set); a new trip needs both.
-        if (to == null || (from == null && !carrying)) { Unlock(d); noRoom.Remove(d); return; }
+        // A new trip needs both; carrying needs the receiver (cargo waits until one is set); flying back empty needs neither.
+        if (d.Leg == Leg.AtSender ? from == null || to == null : carrying && to == null) { Unlock(d); noRoom.Remove(d); return; }
         if (locks.TryGetValue(d, out var held) && (!carrying || held.at.Pointer != to.Entity.Pointer)) Unlock(d); // receiver changed
         if (carrying && !locks.ContainsKey(d)) locks[d] = (to.Entity, Reserve(to.Entity, d.Cargo));
         if (d.LegSecondsLeft > 0f) { d.LegSecondsLeft -= dt; return; }
-        float flight = from == null ? 0f : Vector3.Distance(from.Entity.transform.position, to.Entity.transform.position) / MetersPerSecond;
+        float flight = from == null || to == null ? 0f : Vector3.Distance(from.Entity.transform.position, to.Entity.transform.position) / MetersPerSecond;
 
         switch (d.Leg)
         {
@@ -221,17 +221,35 @@ static class Courier
     // Puts what fits into the receiver; whatever doesn't fit stays in the cargo.
     static void Unload(PlaceableStorageEntity to, List<string> cargo)
     {
-        var storage = to.StorageEntity;
+        var slots = to.StorageEntity.ItemSlots;
         for (int i = cargo.Count - 1; i >= 0; i--)
         {
             var item = ItemDeserializer.LoadItem(cargo[i]);
             if (item == null) { Mod.Log($"dropped unreadable cargo: {cargo[i]}"); cargo.RemoveAt(i); continue; }
-            int fit = Mathf.Min(storage.HowManyCanFit(item), item.Quantity);
-            if (fit <= 0) continue;
-            storage.InsertItem(item.GetCopy(fit), true);
-            if (fit == item.Quantity) cargo.RemoveAt(i);
-            else cargo[i] = item.GetCopy(item.Quantity - fit).GetItemData().GetJson(false);
+            int left = Insert(slots, item);
+            if (left == item.Quantity) continue;
+            if (left == 0) cargo.RemoveAt(i);
+            else cargo[i] = item.GetCopy(left).GetItemData().GetJson(false);
         }
+    }
+
+    // Not StorageEntity.InsertItem: in 0.4.7f12 it SUBTRACTS from a matching stack (ChangeQuantity(-n)) and puts the
+    // whole item in the first empty slot, so delivering onto a partial stack destroyed goods. Per slot instead:
+    // matching stacks first, then empty slots, skipping locked ones. Returns how many didn't fit.
+    static int Insert(Il2CppSystem.Collections.Generic.List<ItemSlot> slots, ItemInstance item)
+    {
+        int left = item.Quantity;
+        for (int pass = 0; pass < 2 && left > 0; pass++)
+            for (int i = 0; i < slots.Count && left > 0; i++)
+            {
+                var s = slots[i];
+                if (s.IsLocked || s.IsAddLocked || (s.ItemInstance == null) != (pass == 1)) continue;
+                int n = Mathf.Min(left, s.GetCapacityForItem(item, false));
+                if (n <= 0) continue;
+                s.AddItem(item.GetCopy(n), false); // networked: stacks with ChangeQuantity(+n), fills an empty slot with SetStoredItem
+                left -= n;
+            }
+        return left;
     }
 
     /// Carrying goods but the receiver is cleared or gone: the drone waits with them.

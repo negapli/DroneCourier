@@ -25,15 +25,17 @@ public enum Op { Sender, Receiver, Trigger, Stacks, Every, Mode, Items, Retire, 
 // The host checks every client edit (Valid) and only reads lobby members' data.
 static class Net
 {
-    const string StateKey = "dronecourier", CmdsKey = "dronecourier_cmds", AcksKey = "dronecourier_acks";
+    const string StateKey = "dronecourier", CmdsKey = "dronecourier_cmds", AcksKey = "dronecourier_acks", ProtoKey = "dronecourier_proto";
+    const string Proto = "2"; // bump when host and client can no longer understand each other (2 = player-data commands, 0.1.7)
 
     static SteamNetworkClient steam;
     /// A co-op client: in someone else's lobby and not the server. (FishNet alone isn't enough: while a save loads the
     /// host briefly reports IsServer false, and could then overwrite its loaded drones with the lobby's copy.)
     public static bool IsClient => Online && !steam.IsHost && !InstanceFinder.IsServer;
     static bool Online => steam != null && steam.IsInLobby;
-    /// A co-op client can send edits (and should pay for a drone) only while it sees the host.
-    public static bool CanReachHost => Online && steam.GetHostMember() != null;
+    /// A co-op client can send edits (and should pay for a drone) only while it sees a host running the same protocol
+    /// (an older host ignores the commands: a client would pay for a drone it never gets).
+    public static bool CanReachHost => Online && steam.GetHostMember() != null && steam.GetLobbyData(ProtoKey) == Proto;
 
     // --- setup: the library must start before the game joins a lobby (it watches Steam's lobby-entered event) ---
 
@@ -60,7 +62,7 @@ static class Net
         if (!IsClient) { Apply(d, op, arg); return; }
         string cmdId = Guid.NewGuid().ToString("N");
         if (op is not (Op.Retire or Op.Buy)) { Apply(d, op, arg); pending[d.Id] = (cmdId, UnityEngine.Time.time); } // optimistic, kept until the host confirms
-        if (!Online || steam.GetHostMember() == null) { Mod.Log($"net: not in a lobby, {op} not sent"); return; }
+        if (!CanReachHost) { Mod.Notify("Drones", "Host not reachable or on another DroneCourier version: change not sent."); return; }
         queue.Add(new DroneCmd { Seq = ++seq, Op = (int)op, DroneId = d?.Id ?? "", Arg = arg, CmdId = cmdId });
         if (queue.Count > MaxQueue) { Mod.Log($"net: {queue.Count} edits unconfirmed by the host, dropping the oldest"); queue.RemoveAt(0); }
         WriteQueue();
@@ -194,7 +196,6 @@ static class Net
         var data = steam.GetLobbyData(StateKey);
         if (string.IsNullOrEmpty(data) || Drones.Instance == null) return;
         if (data == lastState && pending.Count == 0) return;
-        lastState = data;
         var list = JArray.Parse(Unzip(data));
         var owned = Drones.Instance.Owned;
         var ids = new HashSet<string>();
@@ -217,6 +218,7 @@ static class Net
         }
         owned.RemoveAll(d => !ids.Contains(d.Id));
         foreach (var id in new List<string>(pending.Keys)) if (!ids.Contains(id)) pending.Remove(id);
+        lastState = data; // only once applied: a throw above retries next tick instead of skipping this list
     }
 
     // Lists replaced, not appended to (Newtonsoft's default fills existing lists)
@@ -240,6 +242,7 @@ static class Net
             list.Add(o);
         }
         string data = Zip(list.ToString(Formatting.None));
+        if (lastPublished == null) steam.SetLobbyData(ProtoKey, Proto); // new lobby
         if (data == lastPublished) return;
         if (data.Length > 8000) Mod.Log($"warning: drone list is {data.Length} bytes, near Steam's lobby data limit (8 KB)"); // ponytail: split across keys if fleets get huge
         lastPublished = data;
@@ -257,7 +260,12 @@ static class Net
         if (Drones.Instance == null) return;
         try
         {
-            if (IsClient) { Receive(); ReadAck(); }
+            if (IsClient)
+            {
+                // Player data is per lobby: after a rejoin our unconfirmed edits (a paid buy) must be written again
+                if (queue.Count > 0 && string.IsNullOrEmpty(steam.GetPlayerData(steam.LocalPlayerId, CmdsKey))) WriteQueue();
+                Receive(); ReadAck();
+            }
             else if (InstanceFinder.IsServer) { Publish(); ReadCommands(); }
         }
         catch (Exception e) { Mod.Log($"net: {e.Message}"); }

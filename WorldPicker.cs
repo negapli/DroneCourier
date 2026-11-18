@@ -42,7 +42,8 @@ static class WorldPicker
     {
         if (drone == null) return;
         // The save unloaded (quit, reload) or the drone was given back mid-pick: stop quietly
-        if (Drones.Instance == null || !Drones.Instance.Owned.Contains(drone)) { End(reopenPhone: false); return; }
+        // (Drones.Instance outlives the world: also stop when the player's camera is gone, e.g. quit to the menu)
+        if (Drones.Instance == null || !Drones.Instance.Owned.Contains(drone) || PlayerSingleton<PlayerCamera>.Instance == null) { End(reopenPhone: false); return; }
         if (Time.time < startAt) return;
         // ponytail: only the storage menu is watched; add other menus (stations, dialogue) if they overlap too
         if (Singleton<StorageMenu>.Instance?.IsOpen == true) { End(reopenPhone: false); Mod.Notify("Drones", "Selection cancelled."); return; } // E on a storage: let its menu own Esc
